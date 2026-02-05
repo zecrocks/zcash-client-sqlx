@@ -186,6 +186,17 @@ pczt-tests = ["serde", "test-dependencies", "zcash_client_backend/pczt"]
 [lib]
 bench = false
 
+[patch.'https://github.com/zcash/librustzcash.git']
+zcash_address = { path = "../librustzcash/components/zcash_address" }
+zcash_client_backend = { path = "../librustzcash/zcash_client_backend" }
+zcash_encoding = { path = "../librustzcash/components/zcash_encoding" }
+zcash_keys = { path = "../librustzcash/zcash_keys" }
+zcash_primitives = { path = "../librustzcash/zcash_primitives" }
+zcash_proofs = { path = "../librustzcash/zcash_proofs" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
+transparent = { package = "zcash_transparent", path = "../librustzcash/zcash_transparent" }
+zip321 = { path = "../librustzcash/components/zip321" }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu7"))',

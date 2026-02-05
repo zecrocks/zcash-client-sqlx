@@ -3121,7 +3121,7 @@ pub async fn put_blocks<P: Parameters>(
         // This is done before processing wallet transactions so that when we insert received notes,
         // we can check if their nullifiers were already spent in a later block we scanned first.
         // (Global table, no wallet_id)
-        for (tx_index, _txid, nullifiers) in block.sapling().nullifier_map() {
+        for (_txid, tx_index, nullifiers) in block.sapling().nullifier_map() {
             for nf in nullifiers {
                 let nf_map_query = r#"
                     INSERT INTO sapling_nullifier_map (spend_pool, nf, block_height, tx_index)
@@ -3138,7 +3138,7 @@ pub async fn put_blocks<P: Parameters>(
         }
 
         #[cfg(feature = "orchard")]
-        for (tx_index, _txid, nullifiers) in block.orchard().nullifier_map() {
+        for (_txid, tx_index, nullifiers) in block.orchard().nullifier_map() {
             for nf in nullifiers {
                 let nf_map_query = r#"
                     INSERT INTO orchard_nullifier_map (spend_pool, nf, block_height, tx_index)
@@ -3173,7 +3173,7 @@ pub async fn put_blocks<P: Parameters>(
                 .bind(wallet_id.expose_uuid())
                 .bind(txid.as_ref())
                 .bind(height_i64)
-                .bind(i64::from(u32::from(tx.block_index())))
+                .bind(tx.block_index() as i64)
                 .fetch_one(pool)
                 .await?;
 
@@ -3871,7 +3871,7 @@ pub async fn store_decrypted_tx<P: Parameters>(
     pool: &Pool,
     params: &P,
     wallet_id: WalletId,
-    received_tx: DecryptedTransaction<'_, Transaction, AccountUuid>,
+    received_tx: DecryptedTransaction<'_, AccountUuid>,
 ) -> Result<(), SqlxClientError> {
     use common::height_to_i64;
     use zcash_client_backend::TransferType;

@@ -1,12 +1,33 @@
 //! Database initialization and migrations.
 //!
-//! This module uses SQLx's built-in migration system. Migrations are stored in
-//! `migrations/` at the crate root and are embedded into the binary at compile time.
+//! This module uses SQLx's built-in migration system. Migrations are embedded
+//! into the binary at compile time using `include_str!`.
+
+use std::borrow::Cow;
 
 #[cfg(feature = "postgres")]
 use sqlx_postgres::PgPool;
 
+use sqlx_core::migrate::{Migration, MigrationType, Migrator};
+
 use crate::SqlxClientError;
+
+const INITIAL_SQL: &str = include_str!("../../migrations/1_initial.sql");
+
+fn embedded_migrator() -> Migrator {
+    Migrator {
+        migrations: Cow::Owned(vec![Migration::new(
+            1,
+            Cow::Borrowed("initial"),
+            MigrationType::Simple,
+            Cow::Borrowed(INITIAL_SQL),
+            false,
+        )]),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+    }
+}
 
 /// Initializes the wallet database by running all pending migrations.
 ///
@@ -21,10 +42,7 @@ use crate::SqlxClientError;
 /// * `pool` - The database connection pool
 #[cfg(feature = "postgres")]
 pub async fn init_wallet_db(pool: &PgPool) -> Result<(), SqlxClientError> {
-    sqlx_core::migrate::Migrator::new(std::path::Path::new("./migrations"))
-        .await?
-        .run(pool)
-        .await?;
+    embedded_migrator().run(pool).await?;
     Ok(())
 }
 

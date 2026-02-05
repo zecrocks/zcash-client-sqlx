@@ -1315,7 +1315,7 @@ impl<P: Parameters> WalletWrite for WalletDb<P> {
 
     fn store_decrypted_tx(
         &mut self,
-        received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
+        received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
         self.block_on(wallet::store_decrypted_tx(
             &self.pool,
