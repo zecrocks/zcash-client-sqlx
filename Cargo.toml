@@ -1,0 +1,202 @@
+[package]
+name = "zcash_client_sqlx"
+description = "A PostgreSQL-backed Zcash light client with native multi-wallet support"
+version = "0.0.1"
+authors = [
+    "Blake Emerson Benthall <e@emersonbenthall.com>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.85.1"
+categories = ["cryptography::cryptocurrencies"]
+
+[package.metadata.docs.rs]
+features = [
+    "postgres",
+    "test-dependencies",
+    "transparent-inputs",
+]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Zcash dependencies from librustzcash (git until next crates.io release)
+zcash_address = { version = "0.10", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false }
+zcash_client_backend = { version = "0.21", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["unstable-serialization", "unstable-spanning-tree"] }
+zcash_encoding = { version = "0.3", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false }
+zcash_keys = { version = "0.12", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false, features = ["sapling"] }
+zcash_primitives = { version = "0.26", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false }
+zcash_protocol = { version = "0.7.2", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.6.2", git = "https://github.com/zcash/librustzcash.git", branch = "main", default-features = false }
+zip32 = { version = "0.2", default-features = false }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Errors
+bip32 = { version = "=0.6.0-pre.1", default-features = false, features = ["alloc"], optional = true }
+bs58 = { version = "0.5", default-features = false, features = ["alloc", "check"] }
+
+# - Logging and metrics
+tracing = { version = "0.1", default-features = false }
+
+# - Serialization
+bitflags = "2"
+byteorder = "1"
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+nonempty = { version = "0.11", default-features = false }
+prost = "0.14"
+group = "0.13"
+jubjub = "0.10"
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+
+# - Secret management
+secrecy = "0.8"
+subtle = { version = "2.2.3", default-features = false }
+
+# - Static assertions
+static_assertions = "1"
+
+# - Shielded protocols
+orchard = { version = "0.12", default-features = false, optional = true }
+sapling = { package = "sapling-crypto", version = "0.6", default-features = false }
+
+# - Transparent protocol
+secp256k1 = { version = "0.29", default-features = false, features = ["alloc"], optional = true }
+zcash_script = { version = "0.4.2", default-features = false, optional = true }
+
+# - Note commitment trees
+incrementalmerkletree = { version = "0.8.2", default-features = false }
+shardtree = { version = "0.6.1", features = ["legacy-api"] }
+
+# - Database
+# IMPORTANT: We use sqlx-core and sqlx-postgres directly instead of the sqlx umbrella crate
+# because the umbrella crate's optional dependencies get activated through the workspace resolver
+# and we can't prevent sqlx-sqlite from being included, which conflicts with zcash_client_sqlite.
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "migrate"] }
+sqlx-postgres = { version = "0.8", default-features = false, features = ["chrono", "uuid", "migrate"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid = { version = "1.1", features = ["v4"] }
+time = { version = "0.3.22", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+# Testing support
+ambassador = { version = "0.4", optional = true }
+testcontainers = { version = "0.23", optional = true }
+testcontainers-modules = { version = "0.11", features = ["postgres"], optional = true }
+rand_chacha = { version = "0.3", optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+document-features = "0.2"
+maybe-rayon = { version = "0.1.0", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+rand = { version = "0.8", default-features = false }
+rand_distr = { version = "0.4", default-features = false }
+thiserror = "2"
+async-trait = "0.1"
+
+[dev-dependencies]
+ambassador = "0.4"
+assert_matches = "1.5"
+bls12_381 = "0.8"
+incrementalmerkletree = { version = "0.8.2", features = ["test-dependencies"] }
+incrementalmerkletree-testing = "0.3"
+pasta_curves = "0.5"
+shardtree = { version = "0.6.1", features = ["legacy-api", "test-dependencies"] }
+orchard = { version = "0.12", features = ["test-dependencies"] }
+proptest = ">=1,<1.7"
+rand_chacha = "0.3"
+rand_core = "0.6"
+secp256k1 = { version = "0.29", features = ["rand"] }
+tempfile = "3.5.0"
+zcash_keys = { version = "0.12", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["test-dependencies"] }
+zcash_note_encryption = "0.4.1"
+zcash_proofs = { version = "0.26", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["bundled-prover"] }
+zcash_primitives = { version = "0.26", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["test-dependencies", "non-standard-fees"] }
+zcash_protocol = { version = "0.7.2", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["local-consensus"] }
+zcash_client_backend = { version = "0.21", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
+zcash_address = { version = "0.10", git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["test-dependencies"] }
+zip321 = { version = "0.6", git = "https://github.com/zcash/librustzcash.git", branch = "main" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# For integration tests with real databases
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+
+[features]
+default = ["postgres"]
+
+## Enables PostgreSQL database backend support.
+postgres = ["dep:sqlx-postgres"]
+
+## Enables multithreading support for creating proofs and building subtrees.
+multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
+
+## Enables support for storing data related to the sending and receiving of
+## Orchard funds.
+orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:ambassador",
+    "dep:rand_chacha",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "incrementalmerkletree/test-dependencies",
+    "zcash_primitives/test-dependencies",
+    "zcash_client_backend/test-dependencies",
+]
+
+## Enables receiving transparent funds and sending to transparent recipients
+transparent-inputs = [
+  "dep:bip32",
+  "dep:secp256k1",
+  "dep:zcash_script",
+  "transparent/transparent-inputs",
+  "zcash_keys/transparent-inputs",
+  "zcash_client_backend/transparent-inputs"
+]
+
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature must
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = [
+  "transparent-inputs",
+  "zcash_client_backend/transparent-key-import"
+]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
+unstable = ["zcash_client_backend/unstable"]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
+
+## Enables `serde` derives for certain types.
+serde = ["dep:serde", "uuid/serde"]
+
+## A feature used to enable PCZT-specific tests without interfering with the
+## protocol-specific flags. Test-only.
+pczt-tests = ["serde", "test-dependencies", "zcash_client_backend/pczt"]
+
+[lib]
+bench = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(zcash_unstable, values("zfuture", "nu7"))',
+  'cfg(live_network_tests)',
+] }
+
+[profile.release]
+lto = true
+panic = 'abort'
+codegen-units = 1
+
+[profile.test]
+opt-level = 3
+debug = true
