@@ -356,7 +356,7 @@ CREATE TABLE scan_queue (
     wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
     block_range_start BIGINT NOT NULL,
     block_range_end BIGINT NOT NULL,
-    priority INTEGER NOT NULL,
+    priority BIGINT NOT NULL,
     PRIMARY KEY (wallet_id, block_range_start),
     UNIQUE (wallet_id, block_range_end),
     CONSTRAINT chk_range_valid CHECK (block_range_start < block_range_end)
@@ -429,3 +429,254 @@ CREATE TABLE transparent_spend_map (
 );
 
 CREATE INDEX idx_transparent_spend_map_tx ON transparent_spend_map (spending_transaction_id);
+
+-- ============================================================================
+-- Views for transaction listing and reporting
+-- ============================================================================
+
+-- Union of all received outputs across pools, with sent_note linkage
+CREATE VIEW v_received_outputs AS
+    SELECT
+        sapling_received_notes.id AS id_within_pool_table,
+        sapling_received_notes.tx_id AS transaction_id,
+        sapling_received_notes.wallet_id,
+        2 AS pool,
+        sapling_received_notes.output_index,
+        sapling_received_notes.account_id,
+        sapling_received_notes.value,
+        sapling_received_notes.is_change,
+        sapling_received_notes.memo,
+        sent_notes.id AS sent_note_id,
+        sapling_received_notes.address_id
+    FROM sapling_received_notes
+    LEFT JOIN sent_notes
+        ON sent_notes.tx_id = sapling_received_notes.tx_id
+        AND sent_notes.output_pool = 2
+        AND sent_notes.output_index = sapling_received_notes.output_index
+UNION ALL
+    SELECT
+        orchard_received_notes.id AS id_within_pool_table,
+        orchard_received_notes.tx_id AS transaction_id,
+        orchard_received_notes.wallet_id,
+        3 AS pool,
+        orchard_received_notes.action_index AS output_index,
+        orchard_received_notes.account_id,
+        orchard_received_notes.value,
+        orchard_received_notes.is_change,
+        orchard_received_notes.memo,
+        sent_notes.id AS sent_note_id,
+        orchard_received_notes.address_id
+    FROM orchard_received_notes
+    LEFT JOIN sent_notes
+        ON sent_notes.tx_id = orchard_received_notes.tx_id
+        AND sent_notes.output_pool = 3
+        AND sent_notes.output_index = orchard_received_notes.action_index
+UNION ALL
+    SELECT
+        u.id AS id_within_pool_table,
+        u.tx_id AS transaction_id,
+        u.wallet_id,
+        0 AS pool,
+        u.output_index,
+        u.account_id,
+        u.value_zat AS value,
+        FALSE AS is_change,
+        NULL AS memo,
+        sent_notes.id AS sent_note_id,
+        u.address_id
+    FROM transparent_received_outputs u
+    LEFT JOIN sent_notes
+        ON sent_notes.tx_id = u.tx_id
+        AND sent_notes.output_pool = 0
+        AND sent_notes.output_index = u.output_index;
+
+-- Union of all received output spends across pools
+CREATE VIEW v_received_output_spends AS
+    SELECT
+        2 AS pool,
+        s.sapling_received_note_id AS received_output_id,
+        s.transaction_id,
+        rn.account_id
+    FROM sapling_received_note_spends s
+    JOIN sapling_received_notes rn ON rn.id = s.sapling_received_note_id
+UNION ALL
+    SELECT
+        3 AS pool,
+        s.orchard_received_note_id AS received_output_id,
+        s.transaction_id,
+        rn.account_id
+    FROM orchard_received_note_spends s
+    JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
+UNION ALL
+    SELECT
+        0 AS pool,
+        s.transparent_received_output_id AS received_output_id,
+        s.transaction_id,
+        rn.account_id
+    FROM transparent_received_output_spends s
+    JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id;
+
+-- Summarized transaction view per account
+CREATE VIEW v_transactions AS
+WITH
+notes AS (
+    -- Outputs received in this transaction
+    SELECT ro.account_id              AS account_id,
+           ro.wallet_id               AS wallet_id,
+           transactions.mined_height  AS mined_height,
+           transactions.txid          AS txid,
+           ro.pool                    AS pool,
+           id_within_pool_table,
+           ro.value                   AS value,
+           ro.value                   AS received_value,
+           0::bigint                  AS spent_value,
+           0                          AS spent_note_count,
+           CASE WHEN ro.is_change THEN 1 ELSE 0 END AS change_note_count,
+           CASE WHEN ro.is_change THEN 0 ELSE 1 END AS received_count,
+           CASE
+             WHEN (ro.memo IS NULL OR ro.memo = E'\\xF6'::bytea)
+               THEN 0 ELSE 1
+           END AS memo_present,
+           CASE WHEN ro.pool = 0 THEN 1 ELSE 0 END AS does_not_match_shielding
+    FROM v_received_outputs ro
+    JOIN transactions ON transactions.id = ro.transaction_id
+UNION ALL
+    -- Outputs spent in this transaction
+    SELECT ro.account_id              AS account_id,
+           ro.wallet_id               AS wallet_id,
+           transactions.mined_height  AS mined_height,
+           transactions.txid          AS txid,
+           ro.pool                    AS pool,
+           id_within_pool_table,
+           -ro.value                  AS value,
+           0::bigint                  AS received_value,
+           ro.value                   AS spent_value,
+           1                          AS spent_note_count,
+           0                          AS change_note_count,
+           0                          AS received_count,
+           0                          AS memo_present,
+           CASE WHEN ro.pool != 0 THEN 1 ELSE 0 END AS does_not_match_shielding
+    FROM v_received_outputs ro
+    JOIN v_received_output_spends ros
+         ON ros.pool = ro.pool
+         AND ros.received_output_id = ro.id_within_pool_table
+    JOIN transactions ON transactions.id = ros.transaction_id
+),
+sent_note_counts AS (
+    SELECT sent_notes.from_account_id     AS account_id,
+           transactions.txid              AS txid,
+           COUNT(DISTINCT sent_notes.id)  AS sent_notes,
+           SUM(
+             CASE
+               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = E'\\xF6'::bytea OR ro.transaction_id IS NOT NULL)
+                 THEN 0 ELSE 1
+             END
+           ) AS memo_count
+    FROM sent_notes
+    JOIN transactions ON transactions.id = sent_notes.tx_id
+    LEFT JOIN v_received_outputs ro ON sent_notes.id = ro.sent_note_id
+    WHERE COALESCE(ro.is_change, FALSE) = FALSE
+    GROUP BY sent_notes.from_account_id, transactions.txid
+),
+blocks_max_height AS (
+    SELECT MAX(blocks.height) AS max_height FROM blocks
+)
+SELECT accounts.uuid                AS account_uuid,
+       notes.wallet_id              AS wallet_id,
+       notes.mined_height           AS mined_height,
+       notes.txid                   AS txid,
+       transactions.tx_index        AS tx_index,
+       transactions.expiry_height   AS expiry_height,
+       transactions.raw             AS raw,
+       SUM(notes.value)             AS account_balance_delta,
+       SUM(notes.spent_value)       AS total_spent,
+       SUM(notes.received_value)    AS total_received,
+       transactions.fee             AS fee_paid,
+       (SUM(notes.change_note_count) > 0)  AS has_change,
+       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+       SUM(notes.received_count)         AS received_note_count,
+       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+       blocks.time                       AS block_time,
+       (
+            notes.mined_height IS NULL
+            AND transactions.expiry_height > 0
+            AND transactions.expiry_height <= blocks_max_height.max_height
+       ) AS expired_unmined,
+       SUM(notes.spent_note_count) AS spent_note_count
+FROM notes
+LEFT JOIN accounts ON accounts.id = notes.account_id
+LEFT JOIN transactions
+     ON notes.txid = transactions.txid AND notes.wallet_id = transactions.wallet_id
+CROSS JOIN blocks_max_height
+LEFT JOIN blocks ON blocks.height = notes.mined_height
+LEFT JOIN sent_note_counts
+     ON sent_note_counts.account_id = notes.account_id
+     AND sent_note_counts.txid = notes.txid
+GROUP BY notes.wallet_id, notes.account_id, notes.txid,
+         accounts.uuid, transactions.tx_index, transactions.expiry_height,
+         transactions.raw, transactions.fee, blocks.time, notes.mined_height,
+         blocks_max_height.max_height;
+
+-- Detailed transaction outputs view
+CREATE VIEW v_tx_outputs AS
+WITH unioned AS (
+    SELECT t.id                         AS transaction_id,
+           t.wallet_id                  AS wallet_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           COALESCE(t.trust_status, 0)  AS trust_status,
+           ro.pool                      AS output_pool,
+           ro.output_index              AS output_index,
+           from_account.uuid            AS from_account_uuid,
+           to_account.uuid              AS to_account_uuid,
+           a.address                    AS to_address,
+           a.diversifier_index_be       AS diversifier_index_be,
+           ro.value                     AS value,
+           ro.is_change                 AS is_change,
+           ro.memo                      AS memo,
+           a.key_scope                  AS recipient_key_scope
+    FROM v_received_outputs ro
+    JOIN transactions t ON t.id = ro.transaction_id
+    LEFT JOIN addresses a ON a.id = ro.address_id
+    LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+    LEFT JOIN accounts to_account ON to_account.id = ro.account_id
+UNION ALL
+    SELECT t.id                         AS transaction_id,
+           t.wallet_id                  AS wallet_id,
+           t.txid                       AS txid,
+           t.mined_height               AS mined_height,
+           COALESCE(t.trust_status, 0)  AS trust_status,
+           sent_notes.output_pool       AS output_pool,
+           sent_notes.output_index      AS output_index,
+           from_account.uuid            AS from_account_uuid,
+           NULL::uuid                   AS to_account_uuid,
+           sent_notes.to_address        AS to_address,
+           NULL::bytea                  AS diversifier_index_be,
+           sent_notes.value             AS value,
+           FALSE                        AS is_change,
+           sent_notes.memo              AS memo,
+           NULL::integer                AS recipient_key_scope
+    FROM sent_notes
+    JOIN transactions t ON t.id = sent_notes.tx_id
+    LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+    WHERE ro.sent_note_id IS NULL
+)
+SELECT
+    transaction_id,
+    wallet_id,
+    (array_agg(txid))[1]                   AS txid,
+    MAX(mined_height)                      AS tx_mined_height,
+    MIN(trust_status)                      AS tx_trust_status,
+    output_pool,
+    output_index,
+    (array_agg(from_account_uuid))[1]      AS from_account_uuid,
+    (array_agg(to_account_uuid))[1]        AS to_account_uuid,
+    MAX(to_address)                        AS to_address,
+    MAX(value)                             AS value,
+    BOOL_OR(is_change)                     AS is_change,
+    (array_agg(memo))[1]                   AS memo,
+    MAX(recipient_key_scope)               AS recipient_key_scope
+FROM unioned
+GROUP BY transaction_id, wallet_id, output_pool, output_index;

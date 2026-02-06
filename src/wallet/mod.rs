@@ -204,7 +204,7 @@ pub async fn create_wallet<P: Parameters>(
     name: Option<&str>,
 ) -> Result<WalletId, SqlxClientError> {
     let wallet_id = WalletId::new();
-    let network = format!("{:?}", params.network_type());
+    let network = format!("{:?}", params.network_type()).to_lowercase();
 
     sqlx_core::query::query(
         "INSERT INTO wallets (id, name, network, created_at) VALUES ($1, $2, $3, $4)",
@@ -3328,7 +3328,7 @@ pub async fn put_blocks<P: Parameters>(
         let scanned_end = height_to_i64(end_height) + 1; // exclusive
 
         // First, get all overlapping scan_queue entries
-        let overlapping: Vec<(i64, i64, i32)> = sqlx_core::query_as::query_as(
+        let overlapping: Vec<(i64, i64, i64)> = sqlx_core::query_as::query_as(
             r#"
             SELECT block_range_start, block_range_end, priority
             FROM scan_queue
@@ -3366,8 +3366,9 @@ pub async fn put_blocks<P: Parameters>(
                     r#"
                     INSERT INTO scan_queue (wallet_id, block_range_start, block_range_end, priority)
                     VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (wallet_id, block_range_start, block_range_end)
-                    DO UPDATE SET priority = GREATEST(scan_queue.priority, $4)
+                    ON CONFLICT (wallet_id, block_range_start)
+                    DO UPDATE SET priority = GREATEST(scan_queue.priority, $4),
+                                  block_range_end = EXCLUDED.block_range_end
                     "#,
                 )
                 .bind(wallet_id.expose_uuid())
@@ -3384,8 +3385,9 @@ pub async fn put_blocks<P: Parameters>(
                     r#"
                     INSERT INTO scan_queue (wallet_id, block_range_start, block_range_end, priority)
                     VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (wallet_id, block_range_start, block_range_end)
-                    DO UPDATE SET priority = GREATEST(scan_queue.priority, $4)
+                    ON CONFLICT (wallet_id, block_range_start)
+                    DO UPDATE SET priority = GREATEST(scan_queue.priority, $4),
+                                  block_range_end = EXCLUDED.block_range_end
                     "#,
                 )
                 .bind(wallet_id.expose_uuid())

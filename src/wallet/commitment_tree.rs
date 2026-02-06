@@ -56,6 +56,12 @@ impl<'a, H, const SHARD_HEIGHT: u8> SqlxShardStore<'a, H, SHARD_HEIGHT> {
             _phantom: PhantomData,
         }
     }
+
+    /// Executes a future on the runtime handle, using `block_in_place` to avoid
+    /// panicking when called from within an async context.
+    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        tokio::task::block_in_place(|| self.handle.block_on(future))
+    }
 }
 
 // ============================================================================
@@ -628,12 +634,11 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
         &self,
         shard_root: Address,
     ) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        self.handle
-            .block_on(get_shard_async(self.pool, self.table_prefix, shard_root))
+        self.block_on(get_shard_async(self.pool, self.table_prefix, shard_root))
     }
 
     fn last_shard(&self) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        self.handle.block_on(last_shard_async(
+        self.block_on(last_shard_async(
             self.pool,
             self.table_prefix,
             Self::SHARD_ROOT_LEVEL,
@@ -641,12 +646,11 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     }
 
     fn put_shard(&mut self, subtree: LocatedPrunableTree<Self::H>) -> Result<(), Self::Error> {
-        self.handle
-            .block_on(put_shard_async(self.pool, self.table_prefix, subtree))
+        self.block_on(put_shard_async(self.pool, self.table_prefix, subtree))
     }
 
     fn get_shard_roots(&self) -> Result<Vec<Address>, Self::Error> {
-        self.handle.block_on(get_shard_roots_async(
+        self.block_on(get_shard_roots_async(
             self.pool,
             self.table_prefix,
             Self::SHARD_ROOT_LEVEL,
@@ -654,7 +658,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     }
 
     fn truncate_shards(&mut self, shard_index: u64) -> Result<(), Self::Error> {
-        self.handle.block_on(truncate_shards_async(
+        self.block_on(truncate_shards_async(
             self.pool,
             self.table_prefix,
             shard_index,
@@ -662,23 +666,19 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     }
 
     fn get_cap(&self) -> Result<PrunableTree<Self::H>, Self::Error> {
-        self.handle
-            .block_on(get_cap_async(self.pool, self.table_prefix))
+        self.block_on(get_cap_async(self.pool, self.table_prefix))
     }
 
     fn put_cap(&mut self, cap: PrunableTree<Self::H>) -> Result<(), Self::Error> {
-        self.handle
-            .block_on(put_cap_async(self.pool, self.table_prefix, cap))
+        self.block_on(put_cap_async(self.pool, self.table_prefix, cap))
     }
 
     fn min_checkpoint_id(&self) -> Result<Option<Self::CheckpointId>, Self::Error> {
-        self.handle
-            .block_on(min_checkpoint_id_async(self.pool, self.table_prefix))
+        self.block_on(min_checkpoint_id_async(self.pool, self.table_prefix))
     }
 
     fn max_checkpoint_id(&self) -> Result<Option<Self::CheckpointId>, Self::Error> {
-        self.handle
-            .block_on(max_checkpoint_id_async(self.pool, self.table_prefix))
+        self.block_on(max_checkpoint_id_async(self.pool, self.table_prefix))
     }
 
     fn add_checkpoint(
@@ -686,7 +686,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
         checkpoint_id: Self::CheckpointId,
         checkpoint: Checkpoint,
     ) -> Result<(), Self::Error> {
-        self.handle.block_on(add_checkpoint_async(
+        self.block_on(add_checkpoint_async(
             self.pool,
             self.table_prefix,
             checkpoint_id,
@@ -695,15 +695,14 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     }
 
     fn checkpoint_count(&self) -> Result<usize, Self::Error> {
-        self.handle
-            .block_on(checkpoint_count_async(self.pool, self.table_prefix))
+        self.block_on(checkpoint_count_async(self.pool, self.table_prefix))
     }
 
     fn get_checkpoint_at_depth(
         &self,
         checkpoint_depth: usize,
     ) -> Result<Option<(Self::CheckpointId, Checkpoint)>, Self::Error> {
-        self.handle.block_on(get_checkpoint_at_depth_async(
+        self.block_on(get_checkpoint_at_depth_async(
             self.pool,
             self.table_prefix,
             checkpoint_depth,
@@ -714,7 +713,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
         &self,
         checkpoint_id: &Self::CheckpointId,
     ) -> Result<Option<Checkpoint>, Self::Error> {
-        self.handle.block_on(get_checkpoint_async(
+        self.block_on(get_checkpoint_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,
@@ -725,7 +724,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(with_checkpoints_async(
+        self.block_on(with_checkpoints_async(
             self.pool,
             self.table_prefix,
             limit,
@@ -737,7 +736,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(with_checkpoints_async(
+        self.block_on(with_checkpoints_async(
             self.pool,
             self.table_prefix,
             limit,
@@ -753,7 +752,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     where
         F: Fn(&mut Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(async {
+        self.block_on(async {
             if let Some(mut checkpoint) =
                 get_checkpoint_async(self.pool, self.table_prefix, *checkpoint_id).await?
             {
@@ -769,7 +768,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
     }
 
     fn remove_checkpoint(&mut self, checkpoint_id: &Self::CheckpointId) -> Result<(), Self::Error> {
-        self.handle.block_on(remove_checkpoint_async(
+        self.block_on(remove_checkpoint_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,
@@ -780,7 +779,7 @@ impl ShardStore for SqlxShardStore<'_, sapling::Node, { SAPLING_SHARD_HEIGHT }> 
         &mut self,
         checkpoint_id: &Self::CheckpointId,
     ) -> Result<(), Self::Error> {
-        self.handle.block_on(truncate_checkpoints_retaining_async(
+        self.block_on(truncate_checkpoints_retaining_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,
@@ -802,12 +801,11 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
         &self,
         shard_root: Address,
     ) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        self.handle
-            .block_on(get_shard_async(self.pool, self.table_prefix, shard_root))
+        self.block_on(get_shard_async(self.pool, self.table_prefix, shard_root))
     }
 
     fn last_shard(&self) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        self.handle.block_on(last_shard_async(
+        self.block_on(last_shard_async(
             self.pool,
             self.table_prefix,
             Self::SHARD_ROOT_LEVEL,
@@ -815,12 +813,11 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     }
 
     fn put_shard(&mut self, subtree: LocatedPrunableTree<Self::H>) -> Result<(), Self::Error> {
-        self.handle
-            .block_on(put_shard_async(self.pool, self.table_prefix, subtree))
+        self.block_on(put_shard_async(self.pool, self.table_prefix, subtree))
     }
 
     fn get_shard_roots(&self) -> Result<Vec<Address>, Self::Error> {
-        self.handle.block_on(get_shard_roots_async(
+        self.block_on(get_shard_roots_async(
             self.pool,
             self.table_prefix,
             Self::SHARD_ROOT_LEVEL,
@@ -828,7 +825,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     }
 
     fn truncate_shards(&mut self, shard_index: u64) -> Result<(), Self::Error> {
-        self.handle.block_on(truncate_shards_async(
+        self.block_on(truncate_shards_async(
             self.pool,
             self.table_prefix,
             shard_index,
@@ -836,23 +833,19 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     }
 
     fn get_cap(&self) -> Result<PrunableTree<Self::H>, Self::Error> {
-        self.handle
-            .block_on(get_cap_async(self.pool, self.table_prefix))
+        self.block_on(get_cap_async(self.pool, self.table_prefix))
     }
 
     fn put_cap(&mut self, cap: PrunableTree<Self::H>) -> Result<(), Self::Error> {
-        self.handle
-            .block_on(put_cap_async(self.pool, self.table_prefix, cap))
+        self.block_on(put_cap_async(self.pool, self.table_prefix, cap))
     }
 
     fn min_checkpoint_id(&self) -> Result<Option<Self::CheckpointId>, Self::Error> {
-        self.handle
-            .block_on(min_checkpoint_id_async(self.pool, self.table_prefix))
+        self.block_on(min_checkpoint_id_async(self.pool, self.table_prefix))
     }
 
     fn max_checkpoint_id(&self) -> Result<Option<Self::CheckpointId>, Self::Error> {
-        self.handle
-            .block_on(max_checkpoint_id_async(self.pool, self.table_prefix))
+        self.block_on(max_checkpoint_id_async(self.pool, self.table_prefix))
     }
 
     fn add_checkpoint(
@@ -860,7 +853,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
         checkpoint_id: Self::CheckpointId,
         checkpoint: Checkpoint,
     ) -> Result<(), Self::Error> {
-        self.handle.block_on(add_checkpoint_async(
+        self.block_on(add_checkpoint_async(
             self.pool,
             self.table_prefix,
             checkpoint_id,
@@ -869,15 +862,14 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     }
 
     fn checkpoint_count(&self) -> Result<usize, Self::Error> {
-        self.handle
-            .block_on(checkpoint_count_async(self.pool, self.table_prefix))
+        self.block_on(checkpoint_count_async(self.pool, self.table_prefix))
     }
 
     fn get_checkpoint_at_depth(
         &self,
         checkpoint_depth: usize,
     ) -> Result<Option<(Self::CheckpointId, Checkpoint)>, Self::Error> {
-        self.handle.block_on(get_checkpoint_at_depth_async(
+        self.block_on(get_checkpoint_at_depth_async(
             self.pool,
             self.table_prefix,
             checkpoint_depth,
@@ -888,7 +880,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
         &self,
         checkpoint_id: &Self::CheckpointId,
     ) -> Result<Option<Checkpoint>, Self::Error> {
-        self.handle.block_on(get_checkpoint_async(
+        self.block_on(get_checkpoint_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,
@@ -899,7 +891,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(with_checkpoints_async(
+        self.block_on(with_checkpoints_async(
             self.pool,
             self.table_prefix,
             limit,
@@ -911,7 +903,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(with_checkpoints_async(
+        self.block_on(with_checkpoints_async(
             self.pool,
             self.table_prefix,
             limit,
@@ -927,7 +919,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     where
         F: Fn(&mut Checkpoint) -> Result<(), Self::Error>,
     {
-        self.handle.block_on(async {
+        self.block_on(async {
             if let Some(mut checkpoint) =
                 get_checkpoint_async(self.pool, self.table_prefix, *checkpoint_id).await?
             {
@@ -943,7 +935,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
     }
 
     fn remove_checkpoint(&mut self, checkpoint_id: &Self::CheckpointId) -> Result<(), Self::Error> {
-        self.handle.block_on(remove_checkpoint_async(
+        self.block_on(remove_checkpoint_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,
@@ -954,7 +946,7 @@ impl ShardStore for SqlxShardStore<'_, orchard::tree::MerkleHashOrchard, { ORCHA
         &mut self,
         checkpoint_id: &Self::CheckpointId,
     ) -> Result<(), Self::Error> {
-        self.handle.block_on(truncate_checkpoints_retaining_async(
+        self.block_on(truncate_checkpoints_retaining_async(
             self.pool,
             self.table_prefix,
             *checkpoint_id,

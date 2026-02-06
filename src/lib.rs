@@ -393,7 +393,14 @@ impl<P: Parameters> WalletDb<P> {
 
     /// Executes a future on the runtime.
     pub(crate) fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.runtime.handle().block_on(future)
+        match &self.runtime {
+            RuntimeHandle::Owned(rt) => rt.block_on(future),
+            RuntimeHandle::Handle(handle) => {
+                // When using an external handle, we may be called from within an async
+                // context. Use block_in_place to avoid panicking.
+                tokio::task::block_in_place(|| handle.block_on(future))
+            }
+        }
     }
 }
 
