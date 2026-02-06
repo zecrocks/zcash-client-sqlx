@@ -5058,3 +5058,148 @@ pub async fn set_transaction_status<P: Parameters>(
 
     Ok(())
 }
+
+// ============================================================================
+// Transaction listing queries (used by devtool and other consumers)
+// ============================================================================
+
+/// A row from the `v_transactions` view, for display purposes.
+///
+/// Fields are raw database primitives; callers handle conversion to domain types.
+#[cfg(feature = "postgres")]
+pub struct TransactionRow {
+    pub mined_height: Option<i64>,
+    pub txid: Vec<u8>,
+    pub expiry_height: Option<i64>,
+    pub account_balance_delta: Option<i64>,
+    pub fee_paid: Option<i64>,
+    pub sent_note_count: Option<i64>,
+    pub received_note_count: Option<i64>,
+    pub memo_count: Option<i64>,
+    pub block_time: Option<i64>,
+    pub expired_unmined: Option<bool>,
+}
+
+#[cfg(feature = "postgres")]
+impl<'r> sqlx_core::from_row::FromRow<'r, sqlx_postgres::PgRow> for TransactionRow {
+    fn from_row(row: &'r sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+        use sqlx_core::row::Row;
+        Ok(Self {
+            mined_height: row.try_get("mined_height")?,
+            txid: row.try_get("txid")?,
+            expiry_height: row.try_get("expiry_height")?,
+            account_balance_delta: row.try_get("account_balance_delta")?,
+            fee_paid: row.try_get("fee_paid")?,
+            sent_note_count: row.try_get("sent_note_count")?,
+            received_note_count: row.try_get("received_note_count")?,
+            memo_count: row.try_get("memo_count")?,
+            block_time: row.try_get("block_time")?,
+            expired_unmined: row.try_get("expired_unmined")?,
+        })
+    }
+}
+
+/// A row from the `v_tx_outputs` view enriched with account names.
+///
+/// Fields are raw database primitives; callers handle conversion to domain types.
+#[cfg(feature = "postgres")]
+pub struct TransactionOutputRow {
+    pub output_pool: i32,
+    pub output_index: i32,
+    pub from_account_uuid: Option<Uuid>,
+    pub from_account_name: Option<String>,
+    pub to_account_uuid: Option<Uuid>,
+    pub to_account_name: Option<String>,
+    pub to_address: Option<String>,
+    pub value: Option<i64>,
+    pub is_change: Option<bool>,
+    pub memo: Option<Vec<u8>>,
+}
+
+#[cfg(feature = "postgres")]
+impl<'r> sqlx_core::from_row::FromRow<'r, sqlx_postgres::PgRow> for TransactionOutputRow {
+    fn from_row(row: &'r sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+        use sqlx_core::row::Row;
+        Ok(Self {
+            output_pool: row.try_get("output_pool")?,
+            output_index: row.try_get("output_index")?,
+            from_account_uuid: row.try_get("from_account_uuid")?,
+            from_account_name: row.try_get("from_account_name")?,
+            to_account_uuid: row.try_get("to_account_uuid")?,
+            to_account_name: row.try_get("to_account_name")?,
+            to_address: row.try_get("to_address")?,
+            value: row.try_get("value")?,
+            is_change: row.try_get("is_change")?,
+            memo: row.try_get("memo")?,
+        })
+    }
+}
+
+/// Returns a list of transactions for the given wallet, optionally filtered by account.
+///
+/// Results are ordered by block height ascending, with unmined transactions last.
+#[cfg(feature = "postgres")]
+pub async fn get_transactions(
+    pool: &Pool,
+    wallet_id: WalletId,
+    account_uuid: Option<AccountUuid>,
+) -> Result<Vec<TransactionRow>, SqlxClientError> {
+    let rows: Vec<TransactionRow> = sqlx_core::query_as::query_as(
+        "SELECT mined_height,
+            txid,
+            expiry_height,
+            account_balance_delta::BIGINT AS account_balance_delta,
+            fee_paid,
+            sent_note_count::BIGINT AS sent_note_count,
+            received_note_count::BIGINT AS received_note_count,
+            memo_count::BIGINT AS memo_count,
+            block_time,
+            expired_unmined,
+            COALESCE(
+                mined_height,
+                CASE WHEN expiry_height = 0 THEN NULL ELSE expiry_height END
+            ) AS sort_height
+        FROM v_transactions
+        WHERE wallet_id = $1
+          AND ($2::uuid IS NULL OR account_uuid = $2)
+        ORDER BY sort_height ASC NULLS LAST",
+    )
+    .bind(wallet_id.expose_uuid())
+    .bind(account_uuid.map(|a| a.expose_uuid()))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Returns the outputs for a specific transaction, enriched with account names.
+#[cfg(feature = "postgres")]
+pub async fn get_transaction_outputs(
+    pool: &Pool,
+    wallet_id: WalletId,
+    txid: &[u8],
+) -> Result<Vec<TransactionOutputRow>, SqlxClientError> {
+    let rows: Vec<TransactionOutputRow> = sqlx_core::query_as::query_as(
+        "SELECT
+            vo.output_pool,
+            vo.output_index,
+            vo.from_account_uuid,
+            fa.name AS from_account_name,
+            vo.to_account_uuid,
+            ta.name AS to_account_name,
+            vo.to_address,
+            vo.value,
+            vo.is_change,
+            vo.memo
+         FROM v_tx_outputs vo
+         LEFT OUTER JOIN accounts fa ON vo.from_account_uuid = fa.uuid
+         LEFT OUTER JOIN accounts ta ON vo.to_account_uuid = ta.uuid
+         WHERE vo.wallet_id = $1 AND vo.txid = $2",
+    )
+    .bind(wallet_id.expose_uuid())
+    .bind(txid)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}

@@ -71,6 +71,11 @@ pub use crate::{
 #[cfg(feature = "postgres")]
 pub use crate::pool::{Pool, create_pool, create_pool_default};
 
+#[cfg(feature = "postgres")]
+pub use crate::wallet::{
+    TransactionOutputRow, TransactionRow, get_transaction_outputs, get_transactions,
+};
+
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
