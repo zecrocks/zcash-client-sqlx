@@ -272,19 +272,23 @@ async fn get_wallet_birthday(
     }
 }
 
-/// Gets the maximum scanned block height.
+/// Gets the per-wallet max scanned height from the wallets table.
+/// Unlike `block_height_extrema` which reads the global `blocks` table,
+/// this returns the max height scanned by a specific wallet, which is
+/// critical for multi-wallet correctness.
 #[cfg(feature = "postgres")]
-async fn block_height_extrema(pool: &Pool) -> Result<Option<Range<BlockHeight>>, SqlxClientError> {
-    let row: Option<(Option<i64>, Option<i64>)> =
-        sqlx_core::query_as::query_as("SELECT MIN(height), MAX(height) FROM blocks")
+async fn wallet_max_scanned_height(
+    pool: &Pool,
+    wallet_id: WalletId,
+) -> Result<Option<BlockHeight>, SqlxClientError> {
+    let row: Option<(Option<i64>,)> =
+        sqlx_core::query_as::query_as("SELECT max_scanned_height FROM wallets WHERE id = $1")
+            .bind(wallet_id.expose_uuid())
             .fetch_optional(pool)
             .await?;
 
     match row {
-        Some((Some(min_h), Some(max_h))) => Ok(Some(Range {
-            start: i64_to_height(min_h)?,
-            end: i64_to_height(max_h)?,
-        })),
+        Some((Some(h),)) => Ok(Some(i64_to_height(h)?)),
         _ => Ok(None),
     }
 }
@@ -312,8 +316,10 @@ pub async fn update_chain_tip<P: consensus::Parameters>(
         _ => return Ok(()),
     };
 
-    // Read the previous max scanned height from the blocks table
-    let max_scanned = block_height_extrema(pool).await?.map(|range| range.end);
+    // Read the previous max scanned height for THIS wallet (not global blocks table).
+    // In multi-wallet PostgreSQL, the blocks table is shared across wallets, so we
+    // track per-wallet scan progress in wallets.max_scanned_height.
+    let max_scanned = wallet_max_scanned_height(pool, wallet_id).await?;
 
     // Read the wallet birthday (if known).
     let wallet_birthday = get_wallet_birthday(pool, wallet_id).await?;

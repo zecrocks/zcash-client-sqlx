@@ -14,7 +14,8 @@ CREATE TABLE wallets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT,
     network TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    max_scanned_height BIGINT
 );
 
 CREATE INDEX idx_wallets_created ON wallets (created_at);
@@ -157,6 +158,7 @@ CREATE TABLE sapling_received_notes (
 
 CREATE INDEX idx_sapling_received_notes_account ON sapling_received_notes (account_id);
 CREATE INDEX idx_sapling_received_notes_tx ON sapling_received_notes (tx_id);
+CREATE INDEX idx_sapling_received_notes_address ON sapling_received_notes (address_id);
 CREATE UNIQUE INDEX idx_sapling_received_notes_nf ON sapling_received_notes (wallet_id, nf) WHERE nf IS NOT NULL;
 
 -- ============================================================================
@@ -184,6 +186,7 @@ CREATE TABLE orchard_received_notes (
 
 CREATE INDEX idx_orchard_received_notes_account ON orchard_received_notes (account_id);
 CREATE INDEX idx_orchard_received_notes_tx ON orchard_received_notes (tx_id);
+CREATE INDEX idx_orchard_received_notes_address ON orchard_received_notes (address_id);
 CREATE UNIQUE INDEX idx_orchard_received_notes_nf ON orchard_received_notes (wallet_id, nf) WHERE nf IS NOT NULL;
 
 -- ============================================================================
@@ -207,6 +210,7 @@ CREATE TABLE transparent_received_outputs (
 CREATE INDEX idx_transparent_outputs_account ON transparent_received_outputs (account_id);
 CREATE INDEX idx_transparent_outputs_tx ON transparent_received_outputs (tx_id);
 CREATE INDEX idx_transparent_outputs_address ON transparent_received_outputs (address);
+CREATE INDEX idx_transparent_received_outputs_address ON transparent_received_outputs (address_id);
 
 -- ============================================================================
 -- Sent notes (outputs we sent)
@@ -377,7 +381,7 @@ CREATE TABLE sapling_nullifier_map (
     tx_index INTEGER NOT NULL
 );
 
-CREATE INDEX idx_sapling_nfmap_height ON sapling_nullifier_map (block_height);
+CREATE INDEX idx_sapling_nfmap_height ON sapling_nullifier_map (block_height, tx_index);
 
 CREATE TABLE orchard_nullifier_map (
     spend_pool INTEGER NOT NULL,
@@ -386,7 +390,7 @@ CREATE TABLE orchard_nullifier_map (
     tx_index INTEGER NOT NULL
 );
 
-CREATE INDEX idx_orchard_nfmap_height ON orchard_nullifier_map (block_height);
+CREATE INDEX idx_orchard_nfmap_height ON orchard_nullifier_map (block_height, tx_index);
 
 -- ============================================================================
 -- Transaction data requests queue
@@ -661,22 +665,25 @@ UNION ALL
     JOIN transactions t ON t.id = sent_notes.tx_id
     LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
-    WHERE ro.sent_note_id IS NULL
 )
+-- Merge duplicate rows while retaining maximum information.
+-- Uses array_agg with ORDER BY ... IS NULL to prefer non-NULL values first,
+-- matching SQLite's MAX() semantics which ignores NULLs.
+-- (PostgreSQL lacks MAX for bytea/uuid on older versions.)
 SELECT
     transaction_id,
     wallet_id,
-    (array_agg(txid))[1]                   AS txid,
-    MAX(mined_height)                      AS tx_mined_height,
-    MIN(trust_status)                      AS tx_trust_status,
+    (array_agg(txid))[1]                                          AS txid,
+    MAX(mined_height)                                              AS tx_mined_height,
+    MIN(trust_status)                                              AS tx_trust_status,
     output_pool,
     output_index,
-    (array_agg(from_account_uuid))[1]      AS from_account_uuid,
-    (array_agg(to_account_uuid))[1]        AS to_account_uuid,
-    MAX(to_address)                        AS to_address,
-    MAX(value)                             AS value,
-    BOOL_OR(is_change)                     AS is_change,
-    (array_agg(memo))[1]                   AS memo,
-    MAX(recipient_key_scope)               AS recipient_key_scope
+    (array_agg(from_account_uuid ORDER BY from_account_uuid IS NULL))[1] AS from_account_uuid,
+    (array_agg(to_account_uuid ORDER BY to_account_uuid IS NULL))[1]     AS to_account_uuid,
+    MAX(to_address)                                                AS to_address,
+    MAX(value)                                                     AS value,
+    BOOL_OR(is_change)                                             AS is_change,
+    (array_agg(memo ORDER BY memo IS NULL))[1]                     AS memo,
+    MAX(recipient_key_scope)                                       AS recipient_key_scope
 FROM unioned
 GROUP BY transaction_id, wallet_id, output_pool, output_index;

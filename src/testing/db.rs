@@ -264,7 +264,7 @@ impl DataStoreFactory for TestDbFactory {
         &self,
         network: LocalNetwork,
         #[cfg(feature = "transparent-inputs")] gap_limits: Option<
-            zcash_client_backend::wallet::transparent::GapLimits,
+            zcash_client_backend::data_api::testing::transparent::GapLimits,
         >,
     ) -> Result<Self::DataStore, Self::Error> {
         // Create a new runtime for this TestDb instance that will be used for ALL database operations.
@@ -388,8 +388,8 @@ impl Reset for TestDb {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<zcash_client_backend::wallet::transparent::GapLimits> for GapLimits {
-    fn from(limits: zcash_client_backend::wallet::transparent::GapLimits) -> Self {
+impl From<zcash_client_backend::data_api::testing::transparent::GapLimits> for GapLimits {
+    fn from(limits: zcash_client_backend::data_api::testing::transparent::GapLimits) -> Self {
         GapLimits {
             external: limits.external(),
             internal: limits.internal(),

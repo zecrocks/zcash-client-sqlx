@@ -3400,6 +3400,22 @@ pub async fn put_blocks<P: Parameters>(
         }
     }
 
+    // Update per-wallet max_scanned_height
+    if let Some(end_height) = last_height {
+        let end_height_i64 = height_to_i64(end_height);
+        sqlx_core::query::query(
+            r#"
+            UPDATE wallets
+            SET max_scanned_height = GREATEST(COALESCE(max_scanned_height, 0), $2)
+            WHERE id = $1
+            "#,
+        )
+        .bind(wallet_id.expose_uuid())
+        .bind(end_height_i64)
+        .execute(pool)
+        .await?;
+    }
+
     Ok(Some(PutBlocksResult {
         start_height,
         last_scanned_height: last_height,
@@ -4943,6 +4959,19 @@ pub async fn truncate_to_height(
         .bind(max_height_i64)
         .execute(pool)
         .await?;
+
+    // Reset per-wallet max_scanned_height to the truncation height
+    sqlx_core::query::query(
+        r#"
+        UPDATE wallets
+        SET max_scanned_height = LEAST(max_scanned_height, $2)
+        WHERE id = $1
+        "#,
+    )
+    .bind(wallet_id.expose_uuid())
+    .bind(max_height_i64)
+    .execute(pool)
+    .await?;
 
     // Return the actual height we truncated to (the max height in blocks table, or the requested height)
     // blocks table is now global
