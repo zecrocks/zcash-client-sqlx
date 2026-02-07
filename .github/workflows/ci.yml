@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Branch of librustzcash to check out for [patch] resolution.
+  # The Cargo.toml [patch] section overrides git deps with ../librustzcash paths.
+  LIBRUSTZCASH_REF: main
 
 jobs:
   check:
@@ -15,6 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout librustzcash
+        uses: actions/checkout@v4
+        with:
+          repository: zcash/librustzcash
+          ref: ${{ env.LIBRUSTZCASH_REF }}
+          path: ../librustzcash
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Check (default features)
         run: cargo check
       - name: Check (all features)
@@ -25,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -33,29 +47,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout librustzcash
+        uses: actions/checkout@v4
+        with:
+          repository: zcash/librustzcash
+          ref: ${{ env.LIBRUSTZCASH_REF }}
+          path: ../librustzcash
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Clippy (all features)
         run: cargo clippy --all-features --all-targets -- -D warnings
 
   test:
     name: Test
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No services: block needed — testcontainers manages its own
+    # PostgreSQL Docker containers automatically. Docker is pre-installed
+    # on ubuntu-latest runners.
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout librustzcash
+        uses: actions/checkout@v4
+        with:
+          repository: zcash/librustzcash
+          ref: ${{ env.LIBRUSTZCASH_REF }}
+          path: ../librustzcash
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify Docker is available
+        run: docker info
+      - name: Pull PostgreSQL image for testcontainers
+        run: docker pull postgres:11-alpine
       - name: Run tests
         run: cargo test --all-features
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test
+          # Give testcontainers plenty of time to start on CI
+          TESTCONTAINERS_COMMAND_TIMEOUT: 120
+          RUST_LOG: info
