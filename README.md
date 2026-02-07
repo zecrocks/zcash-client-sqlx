@@ -36,7 +36,7 @@ cargo test --all-features
 
 ## Live Network Sync Tests
 
-To test against the live Zcash network, use the `zcash-devtool` from the sibling repository. This validates that `zcash_client_sqlx` produces correct results when syncing real blockchain data.
+To test against the live Zcash network, [use zcash-devtool-sqlx from the sibling repository](https://github.com/zecrocks/zcash-devtool-sqlx). This validates that `zcash_client_sqlx` produces correct results when syncing real blockchain data.
 
 ### Setup
 
